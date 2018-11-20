@@ -68,19 +68,6 @@ THREE.PMREMGenerator.prototype = {
 
 	constructor: THREE.PMREMGenerator,
 
-	/*
-	 * Prashant Sharma / spidersharma03: More thought and work is needed here.
-	 * Right now it's a kind of a hack to use the previously convolved map to convolve the current one.
-	 * I tried to use the original map to convolve all the lods, but for many textures(specially the high frequency)
-	 * even a high number of samples(1024) dosen't lead to satisfactory results.
-	 * By using the previous convolved maps, a lower number of samples are generally sufficient(right now 32, which
-	 * gives okay results unless we see the reflection very carefully, or zoom in too much), however the math
-	 * goes wrong as the distribution function tries to sample a larger area than what it should be. So I simply scaled
-	 * the roughness by 0.9(totally empirical) to try to visually match the original result.
-	 * The condition "if(i <5)" is also an attemt to make the result match the original result.
-	 * This method requires the most amount of thinking I guess. Here is a paper which we could try to implement in future::
-	 * http://http.developer.nvidia.com/GPUGems3/gpugems3_ch20.html
-	 */
 	update: function ( renderer ) {
 
 		this.shader.uniforms[ 'envMap' ].value = this.sourceTexture;
@@ -100,14 +87,10 @@ THREE.PMREMGenerator.prototype = {
 		for ( var i = 0; i < this.numLods; i ++ ) {
 
 			var r = i / ( this.numLods - 1 );
-			this.shader.uniforms[ 'roughness' ].value = r * 0.9; // see comment above, pragmatic choice
-			this.shader.uniforms[ 'queryScale' ].value.x = ( i == 0 ) ? - 1 : 1;
+			this.shader.uniforms[ 'roughness' ].value = r;
 			var size = this.cubeLods[ i ].width;
 			this.shader.uniforms[ 'mapSize' ].value = size;
 			this.renderToCubeMapTarget( renderer, this.cubeLods[ i ] );
-
-			if ( i < 5 ) this.shader.uniforms[ 'envMap' ].value = this.cubeLods[ i ].texture;
-
 		}
 
 		renderer.setRenderTarget( currentRenderTarget );
@@ -149,7 +132,6 @@ THREE.PMREMGenerator.prototype = {
 				"roughness": { value: 0.5 },
 				"mapSize": { value: 0.5 },
 				"envMap": { value: null },
-				"queryScale": { value: new THREE.Vector3( 1, 1, 1 ) },
 				"testColor": { value: new THREE.Vector3( 1, 1, 1 ) },
 			},
 
@@ -160,6 +142,11 @@ THREE.PMREMGenerator.prototype = {
 					gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );\n\
 				}",
 
+      /* Andrew Khosravian: Hammersley2d functionality from 
+       * http://holger.dammertz.org/stuff/notes_HammersleyOnHemisphere.html
+       * more info at 
+       * https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf
+       */
 			fragmentShader:
 				"#include <common>\n\
 				varying vec2 vUv;\n\
@@ -168,36 +155,72 @@ THREE.PMREMGenerator.prototype = {
 				uniform samplerCube envMap;\n\
 				uniform float mapSize;\n\
 				uniform vec3 testColor;\n\
-				uniform vec3 queryScale;\n\
-				\n\
-				float GGXRoughnessToBlinnExponent( const in float ggxRoughness ) {\n\
-					float a = ggxRoughness + 0.0001;\n\
-					a *= a;\n\
-					return ( 2.0 / a - 2.0 );\n\
-				}\n\
-				vec3 ImportanceSamplePhong(vec2 uv, mat3 vecSpace, float specPow) {\n\
-					float phi = uv.y * 2.0 * PI;\n\
-					float cosTheta = pow(1.0 - uv.x, 1.0 / (specPow + 1.0));\n\
-					float sinTheta = sqrt(1.0 - cosTheta * cosTheta);\n\
-					vec3 sampleDir = vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);\n\
-					return vecSpace * sampleDir;\n\
-				}\n\
-				vec3 ImportanceSampleGGX( vec2 uv, mat3 vecSpace, float Roughness )\n\
-				{\n\
-					float a = Roughness * Roughness;\n\
-					float Phi = 2.0 * PI * uv.x;\n\
-					float CosTheta = sqrt( (1.0 - uv.y) / ( 1.0 + (a*a - 1.0) * uv.y ) );\n\
-					float SinTheta = sqrt( 1.0 - CosTheta * CosTheta );\n\
-					return vecSpace * vec3(SinTheta * cos( Phi ), SinTheta * sin( Phi ), CosTheta);\n\
-				}\n\
-				mat3 matrixFromVector(vec3 n) {\n\
+				mat3 MatrixFromVector(vec3 n) {\n\
 					float a = 1.0 / (1.0 + n.z);\n\
 					float b = -n.x * n.y * a;\n\
 					vec3 b1 = vec3(1.0 - n.x * n.x * a, b, -n.x);\n\
 					vec3 b2 = vec3(b, 1.0 - n.y * n.y * a, -n.y);\n\
 					return mat3(b1, b2, n);\n\
 				}\n\
-				\n\
+        vec3 GetSampleDirection() {\n\
+					vec2 uv = vUv*2.0 - 1.0;\n\
+					float offset = -1.0/mapSize;\n\
+					const float a = -1.0;\n\
+					const float b = 1.0;\n\
+					float c = -1.0 + offset;\n\
+					float d = 1.0 - offset;\n\
+					float bminusa = b - a;\n\
+					uv.x = (uv.x - a)/bminusa * d - (uv.x - b)/bminusa * c;\n\
+					uv.y = (uv.y - a)/bminusa * d - (uv.y - b)/bminusa * c;\n\
+					if (faceIndex==0) {\n\
+						return vec3(-1.0, -uv.y, -uv.x);\n\
+					} else if (faceIndex==1) {\n\
+						return vec3(1.0, -uv.y, uv.x);\n\
+					} else if (faceIndex==2) {\n\
+						return vec3(-uv.x, 1.0, uv.y);\n\
+					} else if (faceIndex==3) {\n\
+						return vec3(-uv.x, -1.0, -uv.y);\n\
+					} else if (faceIndex==4) {\n\
+						return vec3(-uv.x, -uv.y, 1.0);\n\
+					} else {\n\
+						return vec3(uv.x, -uv.y, -1.0);\n\
+					}\n\
+        }\n\
+        /*\n\
+				float RadicalInverse_VdC(uint bits) {\n\
+					bits = (bits << 16u) | (bits >> 16u);\n\
+					bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);\n\
+					bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);\n\
+					bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);\n\
+					bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);\n\
+					return float(bits) * 2.3283064365386963e-10; // / 0x100000000\n\
+				}\n\
+        */\n\
+        // slow version using mod since glsl es 2.0 doesn't support bit operations\n\
+        float RadicalInverse_VdC(int bits) {\n\
+          float result = 0.0;\n\
+          float denom = 1.0;\n\
+          float invBase = 0.5;\n\
+          for (int i = 0; i < 32; ++i) {\n\
+            denom = mod(float(bits), 2.0);\n\
+            result += denom * invBase;\n\
+            invBase *= 0.5;\n\
+            bits = int(float(bits) * 0.5);\n\
+            if (bits == 0) break;\n\
+          }\n\
+          return result;\n\
+        }\n\
+				vec2 Hammersley2d(/*uint*/int i, /*uint*/int N) {\n\
+					return vec2(float(i)/float(N), RadicalInverse_VdC(i));\n\
+				}\n\
+				vec3 ImportanceSampleGGX(vec2 Xi, mat3 vecSpace, float Roughness)\n\
+				{\n\
+					float a = Roughness * Roughness;\n\
+					float Phi = 2.0 * PI * Xi.x;\n\
+					float CosTheta = sqrt( (1.0 - Xi.y) / ( 1.0 + (a*a - 1.0) * Xi.y ) );\n\
+					float SinTheta = sqrt( 1.0 - CosTheta * CosTheta );\n\
+					return vecSpace * vec3(SinTheta * cos( Phi ), SinTheta * sin( Phi ), CosTheta);\n\
+				}\n\
 				vec4 testColorMap(float Roughness) {\n\
 					vec4 color;\n\
 					if(faceIndex == 0)\n\
@@ -216,45 +239,22 @@ THREE.PMREMGenerator.prototype = {
 					return color;\n\
 				}\n\
 				void main() {\n\
-					vec3 sampleDirection;\n\
-					vec2 uv = vUv*2.0 - 1.0;\n\
-					float offset = -1.0/mapSize;\n\
-					const float a = -1.0;\n\
-					const float b = 1.0;\n\
-					float c = -1.0 + offset;\n\
-					float d = 1.0 - offset;\n\
-					float bminusa = b - a;\n\
-					uv.x = (uv.x - a)/bminusa * d - (uv.x - b)/bminusa * c;\n\
-					uv.y = (uv.y - a)/bminusa * d - (uv.y - b)/bminusa * c;\n\
-					if (faceIndex==0) {\n\
-						sampleDirection = vec3(1.0, -uv.y, -uv.x);\n\
-					} else if (faceIndex==1) {\n\
-						sampleDirection = vec3(-1.0, -uv.y, uv.x);\n\
-					} else if (faceIndex==2) {\n\
-						sampleDirection = vec3(uv.x, 1.0, uv.y);\n\
-					} else if (faceIndex==3) {\n\
-						sampleDirection = vec3(uv.x, -1.0, -uv.y);\n\
-					} else if (faceIndex==4) {\n\
-						sampleDirection = vec3(uv.x, -uv.y, 1.0);\n\
-					} else {\n\
-						sampleDirection = vec3(-uv.x, -uv.y, -1.0);\n\
-					}\n\
-					mat3 vecSpace = matrixFromVector(normalize(sampleDirection * queryScale));\n\
+					vec3 sampleDirection = GetSampleDirection();\n\
+					mat3 vecSpace = MatrixFromVector(normalize(sampleDirection));\n\
 					vec3 rgbColor = vec3(0.0);\n\
 					const int NumSamples = SAMPLES_PER_LEVEL;\n\
-					vec3 vect;\n\
 					float weight = 0.0;\n\
 					for( int i = 0; i < NumSamples; i ++ ) {\n\
-						float sini = sin(float(i));\n\
-						float cosi = cos(float(i));\n\
-						float r = rand(vec2(sini, cosi));\n\
-						vect = ImportanceSampleGGX(vec2(float(i) / float(NumSamples), r), vecSpace, roughness);\n\
-						float dotProd = dot(vect, normalize(sampleDirection));\n\
-						weight += dotProd;\n\
-						vec3 color = envMapTexelToLinear(textureCube(envMap,vect)).rgb;\n\
-						rgbColor.rgb += color;\n\
+						vec2 Xi = Hammersley2d(i, NumSamples);\n\
+						vec3 H = ImportanceSampleGGX(Xi, vecSpace, roughness);\n\
+            vec3 L = -reflect(sampleDirection, H);\n\
+						float NdotL = dot(L, normalize(sampleDirection));\n\
+            if (NdotL > 0.0) {\n\
+              rgbColor.rgb += envMapTexelToLinear(textureCube(envMap,L, 10.0)).rgb * NdotL;\n\
+              weight += NdotL;\n\
+            }\n\
 					}\n\
-					rgbColor /= float(NumSamples);\n\
+					rgbColor /= weight;\n\
 					//rgbColor = testColorMap( roughness ).rgb;\n\
 					gl_FragColor = linearToOutputTexel( vec4( rgbColor, 1.0 ) );\n\
 				}",
