@@ -213,49 +213,65 @@ THREE.PMREMGenerator.prototype = {
 				vec2 Hammersley2d(/*uint*/int i, /*uint*/int N) {\n\
 					return vec2(float(i)/float(N), RadicalInverse_VdC(i));\n\
 				}\n\
-				vec3 ImportanceSampleGGX(vec2 Xi, mat3 vecSpace, float Roughness)\n\
+				vec3 ImportanceSampleGGX(vec2 Xi, mat3 vecSpace)\n\
 				{\n\
-					float a = Roughness * Roughness;\n\
+					float a = roughness * roughness;\n\
 					float Phi = 2.0 * PI * Xi.x;\n\
 					float CosTheta = sqrt( (1.0 - Xi.y) / ( 1.0 + (a*a - 1.0) * Xi.y ) );\n\
 					float SinTheta = sqrt( 1.0 - CosTheta * CosTheta );\n\
 					return vecSpace * vec3(SinTheta * cos( Phi ), SinTheta * sin( Phi ), CosTheta);\n\
 				}\n\
-				vec4 testColorMap(float Roughness) {\n\
-					vec4 color;\n\
+        float DistributionGGX(float NdotH) {\n\
+          float a = roughness * roughness;\n\
+          float aSq = a * a;\n\
+          float num = aSq;\n\
+          float denom = (NdotH * NdotH * (aSq - 1.0) + 1.0);\n\
+          denom = PI * denom * denom;\n\
+          return num / denom;\n\
+        }\n\
+				vec3 testColorMap() {\n\
+					vec3 color;\n\
 					if(faceIndex == 0)\n\
-						color = vec4(1.0,0.0,0.0,1.0);\n\
+						color = vec3(1.0,0.0,0.0);\n\
 					else if(faceIndex == 1)\n\
-						color = vec4(0.0,1.0,0.0,1.0);\n\
+						color = vec3(0.0,1.0,0.0);\n\
 					else if(faceIndex == 2)\n\
-						color = vec4(0.0,0.0,1.0,1.0);\n\
+						color = vec3(0.0,0.0,1.0);\n\
 					else if(faceIndex == 3)\n\
-						color = vec4(1.0,1.0,0.0,1.0);\n\
+						color = vec3(1.0,1.0,0.0);\n\
 					else if(faceIndex == 4)\n\
-						color = vec4(0.0,1.0,1.0,1.0);\n\
+						color = vec3(0.0,1.0,1.0);\n\
 					else\n\
-						color = vec4(1.0,0.0,1.0,1.0);\n\
-					color *= ( 1.0 - Roughness );\n\
+						color = vec3(1.0,0.0,1.0);\n\
+					color *= ( 1.0 - roughness );\n\
 					return color;\n\
 				}\n\
 				void main() {\n\
 					vec3 sampleDirection = GetSampleDirection();\n\
-					mat3 vecSpace = MatrixFromVector(normalize(sampleDirection));\n\
+          vec3 N = normalize(sampleDirection);\n\
+					mat3 vecSpace = MatrixFromVector(N);\n\
 					vec3 rgbColor = vec3(0.0);\n\
 					const int NumSamples = SAMPLES_PER_LEVEL;\n\
 					float weight = 0.0;\n\
 					for( int i = 0; i < NumSamples; i ++ ) {\n\
 						vec2 Xi = Hammersley2d(i, NumSamples);\n\
-						vec3 H = ImportanceSampleGGX(Xi, vecSpace, roughness);\n\
+						vec3 H = ImportanceSampleGGX(Xi, vecSpace);\n\
             vec3 L = -reflect(sampleDirection, H);\n\
-						float NdotL = dot(L, normalize(sampleDirection));\n\
+						float NdotL = saturate(dot(L, N));\n\
+						float NdotH = saturate(dot(N, H));\n\
+						float HdotV = saturate(dot(H, N)); // NB: baked in assumption that view and sample direction are the same\n\
             if (NdotL > 0.0) {\n\
-              rgbColor.rgb += envMapTexelToLinear(textureCube(envMap,L, 10.0)).rgb * NdotL;\n\
+              float D = DistributionGGX(NdotH);\n\
+              float pdf = (D * NdotH / (4.0 * HdotV)) + 0.0001;\n\
+              float solidAngleOfTexel = 4.0 * PI / (6.0 * mapSize * mapSize);\n\
+              float solidAngleOfSample = 1.0 / (float(SAMPLES_PER_LEVEL) * pdf + 0.0001);\n\
+              float mipLevel = roughness == 0.0 ? 0.0 : 0.5 * log2(solidAngleOfSample / solidAngleOfTexel);\n\
+              rgbColor.rgb += envMapTexelToLinear(textureCube(envMap,L, mipLevel)).rgb * NdotL;\n\
               weight += NdotL;\n\
             }\n\
 					}\n\
 					rgbColor /= weight;\n\
-					//rgbColor = testColorMap( roughness ).rgb;\n\
+					//rgbColor = testColorMap();\n\
 					gl_FragColor = linearToOutputTexel( vec4( rgbColor, 1.0 ) );\n\
 				}",
 
