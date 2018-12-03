@@ -209,7 +209,10 @@ var Loader = function ( editor ) {
 
 					var contents = event.target.result;
 
+					THREE.DRACOLoader.setDecoderPath( '../examples/js/libs/draco/gltf/' );
+
 					var loader = new THREE.GLTFLoader();
+					loader.setDRACOLoader( new THREE.DRACOLoader() );
 					loader.parse( contents, '', function ( result ) {
 
 						result.scene.name = filename;
@@ -573,57 +576,14 @@ var Loader = function ( editor ) {
 
 			case 'geometry':
 
-				var loader = new THREE.JSONLoader();
-				loader.setTexturePath( scope.texturePath );
-
-				var result = loader.parse( data );
-
-				var geometry = result.geometry;
-				var material;
-
-				if ( result.materials !== undefined ) {
-
-					if ( result.materials.length > 1 ) {
-
-						material = new THREE.MultiMaterial( result.materials );
-
-					} else {
-
-						material = result.materials[ 0 ];
-
-					}
-
-				} else {
-
-					material = new THREE.MeshStandardMaterial();
-
-				}
-
-				geometry.sourceType = "ascii";
-				geometry.sourceFile = file.name;
-
-				var mesh;
-
-				if ( geometry.animation && geometry.animation.hierarchy ) {
-
-					mesh = new THREE.SkinnedMesh( geometry, material );
-
-				} else {
-
-					mesh = new THREE.Mesh( geometry, material );
-
-				}
-
-				mesh.name = filename;
-
-				editor.execute( new AddObjectCommand( mesh ) );
+				console.error( 'Loader: "Geometry" is no longer supported.' );
 
 				break;
 
 			case 'object':
 
 				var loader = new THREE.ObjectLoader();
-				loader.setTexturePath( scope.texturePath );
+				loader.setResourcePath( scope.texturePath );
 
 				var result = loader.parse( data );
 
