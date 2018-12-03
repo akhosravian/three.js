@@ -10,7 +10,6 @@
  *	Run Scene_PMREM_Test.html in the examples directory to see the sampling from the cube lods generated
  *	by this class.
  */
-      // TODO: should PMREMGenerator min/mag filter & generate mipmaps really match the input?
       // TODO: Fix seams when using nearest filtering!
 
 THREE.PMREMGenerator = function ( sourceTexture, samplesPerLevel, resolution, sourceResolution ) {
