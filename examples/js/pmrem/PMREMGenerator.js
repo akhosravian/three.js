@@ -10,10 +10,13 @@
  *	Run Scene_PMREM_Test.html in the examples directory to see the sampling from the cube lods generated
  *	by this class.
  */
+      // TODO: should PMREMGenerator min/mag filter & generate mipmaps really match the input?
+      // TODO: Fix seams when using nearest filtering!
 
-THREE.PMREMGenerator = function ( sourceTexture, samplesPerLevel, resolution ) {
+THREE.PMREMGenerator = function ( sourceTexture, samplesPerLevel, resolution, sourceResolution ) {
 
 	this.sourceTexture = sourceTexture;
+  this.sourceResolution = ( sourceResolution !== undefined ) ? sourceResolution : 512;
 	this.resolution = ( resolution !== undefined ) ? resolution : 256; // NODE: 256 is currently hard coded in the glsl code for performance reasons
 	this.samplesPerLevel = ( samplesPerLevel !== undefined ) ? samplesPerLevel : 16;
 
@@ -45,7 +48,7 @@ THREE.PMREMGenerator = function ( sourceTexture, samplesPerLevel, resolution ) {
 		var renderTarget = new THREE.WebGLRenderTargetCube( size, size, params );
 		renderTarget.texture.name = "PMREMGenerator.cube" + i;
 		this.cubeLods.push( renderTarget );
-		size = Math.max( 16, size / 2 );
+		size = size / 2;
 
 	}
 
@@ -72,6 +75,7 @@ THREE.PMREMGenerator.prototype = {
 
 		this.shader.uniforms[ 'envMap' ].value = this.sourceTexture;
 		this.shader.envMap = this.sourceTexture;
+    this.shader.uniforms[ 'mapSize' ].value = this.sourceResolution;
 
 		var gammaInput = renderer.gammaInput;
 		var gammaOutput = renderer.gammaOutput;
@@ -88,8 +92,6 @@ THREE.PMREMGenerator.prototype = {
 
 			var r = i / ( this.numLods - 1 );
 			this.shader.uniforms[ 'roughness' ].value = r;
-			var size = this.cubeLods[ i ].width;
-			this.shader.uniforms[ 'mapSize' ].value = size;
 			this.renderToCubeMapTarget( renderer, this.cubeLods[ i ] );
 		}
 
@@ -257,7 +259,7 @@ THREE.PMREMGenerator.prototype = {
 						vec2 Xi = Hammersley2d(i, NumSamples);\n\
 						vec3 H = ImportanceSampleGGX(Xi, vecSpace);\n\
             vec3 L = -reflect(sampleDirection, H);\n\
-						float NdotL = saturate(dot(L, N));\n\
+						float NdotL = saturate(dot(N, L));\n\
 						float NdotH = saturate(dot(N, H));\n\
 						float HdotV = saturate(dot(H, N)); // NB: baked in assumption that view and sample direction are the same\n\
             if (NdotL > 0.0) {\n\
