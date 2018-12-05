@@ -7,17 +7,14 @@
  *	of pixels makes sure that there is no seams artifacts present. This works perfectly for cubeUV format as
  *	well where the 6 faces can be arranged in any manner whatsoever.
  * Code in the beginning of fragment shader's main function does this job for a given resolution.
- *	Run Scene_PMREM_Test.html in the examples directory to see the sampling from the cube lods generated
- *	by this class.
  */
-      // TODO: Fix seams when using nearest filtering!
 
 THREE.PMREMGenerator = function ( sourceTexture, samplesPerLevel, resolution, sourceResolution ) {
 
 	this.sourceTexture = sourceTexture;
   this.sourceResolution = ( sourceResolution !== undefined ) ? sourceResolution : 512;
 	this.resolution = ( resolution !== undefined ) ? resolution : 256; // NODE: 256 is currently hard coded in the glsl code for performance reasons
-	this.samplesPerLevel = ( samplesPerLevel !== undefined ) ? samplesPerLevel : 16;
+	this.samplesPerLevel = ( samplesPerLevel !== undefined ) ? samplesPerLevel : 32;
 
 	var monotonicEncoding = ( sourceTexture.encoding === THREE.LinearEncoding ) ||
 		( sourceTexture.encoding === THREE.GammaEncoding ) || ( sourceTexture.encoding === THREE.sRGBEncoding );
@@ -47,7 +44,7 @@ THREE.PMREMGenerator = function ( sourceTexture, samplesPerLevel, resolution, so
 		var renderTarget = new THREE.WebGLRenderTargetCube( size, size, params );
 		renderTarget.texture.name = "PMREMGenerator.cube" + i;
 		this.cubeLods.push( renderTarget );
-		size = size / 2;
+		size = Math.max( 16, size / 2 );
 
 	}
 
@@ -74,7 +71,7 @@ THREE.PMREMGenerator.prototype = {
 
 		this.shader.uniforms[ 'envMap' ].value = this.sourceTexture;
 		this.shader.envMap = this.sourceTexture;
-    this.shader.uniforms[ 'mapSize' ].value = this.sourceResolution;
+    this.shader.uniforms[ 'sourceSize' ].value = this.sourceResolution;
 
 		var gammaInput = renderer.gammaInput;
 		var gammaOutput = renderer.gammaOutput;
@@ -91,6 +88,7 @@ THREE.PMREMGenerator.prototype = {
 
 			var r = i / ( this.numLods - 1 );
 			this.shader.uniforms[ 'roughness' ].value = r;
+      this.shader.uniforms[ 'mapSize' ].value = this.cubeLods[ i ].width;
 			this.renderToCubeMapTarget( renderer, this.cubeLods[ i ] );
 		}
 
@@ -132,6 +130,7 @@ THREE.PMREMGenerator.prototype = {
 				"faceIndex": { value: 0 },
 				"roughness": { value: 0.5 },
 				"mapSize": { value: 0.5 },
+        "sourceSize": { value : 256.0 },
 				"envMap": { value: null },
 				"testColor": { value: new THREE.Vector3( 1, 1, 1 ) },
 			},
@@ -144,7 +143,7 @@ THREE.PMREMGenerator.prototype = {
 				}",
 
       /* Andrew Khosravian: Hammersley2d functionality from 
-       * http://holger.dammertz.org/stuff/notes_HammersleyOnHemisphere.html
+       * https://learnopengl.com/PBR/IBL/Specular-IBL
        * more info at 
        * https://blog.selfshadow.com/publications/s2013-shading-course/karis/s2013_pbs_epic_notes_v2.pdf
        */
@@ -155,6 +154,7 @@ THREE.PMREMGenerator.prototype = {
 				uniform float roughness;\n\
 				uniform samplerCube envMap;\n\
 				uniform float mapSize;\n\
+				uniform float sourceSize;\n\
 				uniform vec3 testColor;\n\
 				mat3 MatrixFromVector(vec3 n) {\n\
 					float a = 1.0 / (1.0 + n.z);\n\
@@ -223,12 +223,9 @@ THREE.PMREMGenerator.prototype = {
 					return vecSpace * vec3(SinTheta * cos( Phi ), SinTheta * sin( Phi ), CosTheta);\n\
 				}\n\
         float DistributionGGX(float NdotH) {\n\
-          float a = roughness * roughness;\n\
-          float aSq = a * a;\n\
-          float num = aSq;\n\
-          float denom = (NdotH * NdotH * (aSq - 1.0) + 1.0);\n\
-          denom = PI * denom * denom;\n\
-          return num / denom;\n\
+          float rSq = roughness * roughness;\n\
+          float NdotHSq = NdotH * NdotH;\n\
+          return rSq / pow(NdotHSq * (rSq - 1.0) + 1.0, 2.0);\n\
         }\n\
 				vec3 testColorMap() {\n\
 					vec3 color;\n\
@@ -250,28 +247,31 @@ THREE.PMREMGenerator.prototype = {
 				void main() {\n\
 					vec3 sampleDirection = GetSampleDirection();\n\
           vec3 N = normalize(sampleDirection);\n\
+          vec3 V = N;\n\
 					mat3 vecSpace = MatrixFromVector(N);\n\
 					vec3 rgbColor = vec3(0.0);\n\
 					const int NumSamples = SAMPLES_PER_LEVEL;\n\
+          float solidAngleOfTexel = 4.0 * PI / (6.0 * sourceSize * sourceSize);\n\
 					float weight = 0.0;\n\
 					for( int i = 0; i < NumSamples; i ++ ) {\n\
 						vec2 Xi = Hammersley2d(i, NumSamples);\n\
 						vec3 H = ImportanceSampleGGX(Xi, vecSpace);\n\
-            vec3 L = -reflect(sampleDirection, H);\n\
+            vec3 L = -reflect(V, H);\n\
 						float NdotL = saturate(dot(N, L));\n\
 						float NdotH = saturate(dot(N, H));\n\
-						float HdotV = saturate(dot(H, N)); // NB: baked in assumption that view and sample direction are the same\n\
+						float HdotV = saturate(dot(H, V));\n\
             if (NdotL > 0.0) {\n\
               float D = DistributionGGX(NdotH);\n\
-              float pdf = (D * NdotH / (4.0 * HdotV)) + 0.0001;\n\
-              float solidAngleOfTexel = 4.0 * PI / (6.0 * mapSize * mapSize);\n\
-              float solidAngleOfSample = 1.0 / (float(SAMPLES_PER_LEVEL) * pdf + 0.0001);\n\
+              float pdf = (D * NdotH / (4.0 * HdotV));\n\
+              float solidAngleOfSample = 1.0 / (float(SAMPLES_PER_LEVEL) * pdf);\n\
               float mipLevel = roughness == 0.0 ? 0.0 : 0.5 * log2(solidAngleOfSample / solidAngleOfTexel);\n\
-              rgbColor.rgb += envMapTexelToLinear(textureCube(envMap,L, mipLevel)).rgb * NdotL;\n\
+              rgbColor.rgb += envMapTexelToLinear(textureCube(envMap, L, mipLevel)).rgb * NdotL;\n\
               weight += NdotL;\n\
             }\n\
 					}\n\
-					rgbColor /= weight;\n\
+          if (weight > 0.0) {\n\
+					  rgbColor /= weight;\n\
+          }\n\
 					//rgbColor = testColorMap();\n\
 					gl_FragColor = linearToOutputTexel( vec4( rgbColor, 1.0 ) );\n\
 				}",
