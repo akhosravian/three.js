@@ -51,10 +51,12 @@ THREE.PMREMGenerator = ( function () {
 		this.numLods = Math.log( size ) / Math.log( 2 ) - 2; // IE11 doesn't support Math.log2
 
 		for ( var i = 0; i < this.numLods; i ++ ) {
+
 			var renderTarget = new THREE.WebGLRenderTargetCube( size, size, params );
 			renderTarget.texture.name = "PMREMGenerator.cube" + i;
 			this.cubeLods.push( renderTarget );
 			size = Math.max( 16, size / 2 );
+
 		}
 
 		var extraUniforms = this.useImportanceSampling? getImportanceSamplingUniforms() : getRandomSamplingUniforms();
@@ -80,7 +82,9 @@ THREE.PMREMGenerator = ( function () {
 			shader.uniforms[ 'envMap' ].value = this.sourceTexture;
 			shader.envMap = this.sourceTexture;
 			if ( this.useImportanceSampling ) {
+
 				shader.uniforms[ 'sourceResolution' ].value = this.sourceResolution;
+
 			}
 			shader.needsUpdate = true;
 
@@ -99,12 +103,16 @@ THREE.PMREMGenerator = ( function () {
 
 				var r = i / ( this.numLods - 1 );
 				if ( this.useImportanceSampling ) {
+
 					shader.uniforms[ 'roughness' ].value = r;
+
 				} else {
+
 					shader.uniforms[ 'roughness' ].value = r * 0.9; // see comment below, pragmatic choice
-					// Only apply the tFlip for the first LOD
-					shader.uniforms[ 'tFlip' ].value = ( i == 0 ) ? tFlip : 1;
+
 				}
+				// Only apply the tFlip for the first LOD
+				shader.uniforms[ 'tFlip' ].value = ( i == 0 ) ? tFlip : 1;
 				shader.uniforms[ 'mapSize' ].value = this.cubeLods[ i ].width;
 				this.renderToCubeMapTarget( renderer, this.cubeLods[ i ] );
 
