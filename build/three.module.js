@@ -179,7 +179,7 @@ Object.assign( EventDispatcher.prototype, {
 
 } );
 
-var REVISION = '99dev';
+var REVISION = '99';
 var MOUSE = { LEFT: 0, MIDDLE: 1, RIGHT: 2 };
 var CullFaceNone = 0;
 var CullFaceBack = 1;
@@ -6180,7 +6180,7 @@ var distanceRGBA_frag = "#define DISTANCE\nuniform vec3 referencePosition;\nunif
 
 var distanceRGBA_vert = "#define DISTANCE\nvarying vec3 vWorldPosition;\n#include <common>\n#include <uv_pars_vertex>\n#include <displacementmap_pars_vertex>\n#include <morphtarget_pars_vertex>\n#include <skinning_pars_vertex>\n#include <clipping_planes_pars_vertex>\nvoid main() {\n\t#include <uv_vertex>\n\t#include <skinbase_vertex>\n\t#ifdef USE_DISPLACEMENTMAP\n\t\t#include <beginnormal_vertex>\n\t\t#include <morphnormal_vertex>\n\t\t#include <skinnormal_vertex>\n\t#endif\n\t#include <begin_vertex>\n\t#include <morphtarget_vertex>\n\t#include <skinning_vertex>\n\t#include <displacementmap_vertex>\n\t#include <project_vertex>\n\t#include <worldpos_vertex>\n\t#include <clipping_planes_vertex>\n\tvWorldPosition = worldPosition.xyz;\n}";
 
-var equirect_frag = "uniform sampler2D tEquirect;\nvarying vec3 vWorldDirection;\n#include <common>\nvoid main() {\n\tvec3 direction = normalize( vWorldDirection );\n\tvec2 sampleUV;\n\tsampleUV.y = asin( clamp( direction.y, - 1.0, 1.0 ) ) * RECIPROCAL_PI + 0.5;\n\tsampleUV.x = atan( direction.z, direction.x ) * RECIPROCAL_PI2 + 0.5;\n\tgl_FragColor = texture2D( tEquirect, sampleUV );\n}";
+var equirect_frag = "uniform sampler2D tEquirect;\nvarying vec3 vWorldDirection;\n#include <common>\nvoid main() {\n\tvec3 direction = normalize( vWorldDirection );\n\tvec2 sampleUV;\n\tsampleUV.y = asin( clamp( direction.y, - 1.0, 1.0 ) ) * RECIPROCAL_PI + 0.5;\n\tsampleUV.x = atan( direction.z, direction.x ) * RECIPROCAL_PI2 + 0.5;\n\tvec4 texColor = texture2D( tEquirect, sampleUV );\n\tgl_FragColor = mapTexelToLinear( texColor );\n\t#include <tonemapping_fragment>\n\t#include <encodings_fragment>\n}";
 
 var equirect_vert = "varying vec3 vWorldDirection;\n#include <common>\nvoid main() {\n\tvWorldDirection = transformDirection( position, modelMatrix );\n\t#include <begin_vertex>\n\t#include <project_vertex>\n}";
 
@@ -14596,6 +14596,10 @@ function WebGLBackground( renderer, state, objects, premultipliedAlpha ) {
 
 	var planeMesh;
 	var boxMesh;
+	// Store the current background texture and its `version`
+	// so we can recompile the material accordingly.
+	var currentBackground = null;
+	var currentBackgroundVersion = 0;
 
 	function render( renderList, scene, camera, forceClear ) {
 
@@ -14604,11 +14608,15 @@ function WebGLBackground( renderer, state, objects, premultipliedAlpha ) {
 		if ( background === null ) {
 
 			setClear( clearColor, clearAlpha );
+			currentBackground = null;
+			currentBackgroundVersion = 0;
 
 		} else if ( background && background.isColor ) {
 
 			setClear( background, 1 );
 			forceClear = true;
+			currentBackground = null;
+			currentBackgroundVersion = 0;
 
 		}
 
@@ -14660,11 +14668,22 @@ function WebGLBackground( renderer, state, objects, premultipliedAlpha ) {
 
 			}
 
-			boxMesh.material.uniforms.tCube.value = ( background.isWebGLRenderTargetCube ) ? background.texture : background;
+			var texture = background.isWebGLRenderTargetCube ? background.texture : background;
+			boxMesh.material.uniforms.tCube.value = texture;
 			boxMesh.material.uniforms.tFlip.value = ( background.isWebGLRenderTargetCube ) ? 1 : - 1;
 
+			if ( currentBackground !== background ||
+			     currentBackgroundVersion !== texture.version ) {
+
+				boxMesh.material.needsUpdate = true;
+
+				currentBackground = background;
+				currentBackgroundVersion = texture.version;
+
+			}
+
 			// push to the pre-sorted opaque render list
-			renderList.push( boxMesh, boxMesh.geometry, boxMesh.material, 0, null );
+			renderList.unshift( boxMesh, boxMesh.geometry, boxMesh.material, 0, null );
 
 		} else if ( background && background.isTexture ) {
 
@@ -14678,7 +14697,7 @@ function WebGLBackground( renderer, state, objects, premultipliedAlpha ) {
 						vertexShader: ShaderLib.background.vertexShader,
 						fragmentShader: ShaderLib.background.fragmentShader,
 						side: FrontSide,
-						depthTest: true,
+						depthTest: false,
 						depthWrite: false,
 						fog: false
 					} )
@@ -14711,8 +14730,19 @@ function WebGLBackground( renderer, state, objects, premultipliedAlpha ) {
 
 			planeMesh.material.uniforms.uvTransform.value.copy( background.matrix );
 
+			if ( currentBackground !== background ||
+				   currentBackgroundVersion !== background.version ) {
+
+				planeMesh.material.needsUpdate = true;
+
+				currentBackground = background;
+				currentBackgroundVersion = background.version;
+
+			}
+
+
 			// push to the pre-sorted opaque render list
-			renderList.push( planeMesh, planeMesh.geometry, planeMesh.material, 0, null );
+			renderList.unshift( planeMesh, planeMesh.geometry, planeMesh.material, 0, null );
 
 		}
 
@@ -17762,7 +17792,7 @@ function WebGLRenderList() {
 
 	}
 
-	function push( object, geometry, material, z, group ) {
+	function getNextRenderItem( object, geometry, material, z, group ) {
 
 		var renderItem = renderItems[ renderItemsIndex ];
 
@@ -17794,10 +17824,25 @@ function WebGLRenderList() {
 
 		}
 
+		renderItemsIndex ++;
+
+		return renderItem;
+
+	}
+
+	function push( object, geometry, material, z, group ) {
+
+		var renderItem = getNextRenderItem( object, geometry, material, z, group );
 
 		( material.transparent === true ? transparent : opaque ).push( renderItem );
 
-		renderItemsIndex ++;
+	}
+
+	function unshift( object, geometry, material, z, group ) {
+
+		var renderItem = getNextRenderItem( object, geometry, material, z, group );
+
+		( material.transparent === true ? transparent : opaque ).unshift( renderItem );
 
 	}
 
@@ -17814,6 +17859,7 @@ function WebGLRenderList() {
 
 		init: init,
 		push: push,
+		unshift: unshift,
 
 		sort: sort
 	};
@@ -37889,7 +37935,17 @@ Object.assign( ObjectLoader.prototype, {
 
 					case 'Geometry':
 
-						console.error( 'THREE.ObjectLoader: "Geometry" is no longer supported.' );
+						if ( 'THREE' in window && 'LegacyJSONLoader' in THREE ) {
+
+							var geometryLoader = new THREE.LegacyJSONLoader();
+							geometry = geometryLoader.parse( data, this.resourcePath ).geometry;
+
+
+						} else {
+
+							console.error( 'THREE.ObjectLoader: You have to import LegacyJSONLoader in order load geometry data of type "Geometry".' );
+
+						}
 
 						break;
 
@@ -39848,6 +39904,7 @@ function Audio( listener ) {
 	this.autoplay = false;
 
 	this.buffer = null;
+	this.detune = 0;
 	this.loop = false;
 	this.startTime = 0;
 	this.offset = 0;
@@ -39922,6 +39979,7 @@ Audio.prototype = Object.assign( Object.create( Object3D.prototype ), {
 		var source = this.context.createBufferSource();
 
 		source.buffer = this.buffer;
+		source.detune.value = this.detune;
 		source.loop = this.loop;
 		source.onended = this.onEnded.bind( this );
 		source.playbackRate.setValueAtTime( this.playbackRate, this.startTime );
@@ -40050,6 +40108,26 @@ Audio.prototype = Object.assign( Object.create( Object3D.prototype ), {
 
 	},
 
+	setDetune: function ( value ) {
+
+		this.detune = value;
+
+		if ( this.isPlaying === true ) {
+
+			this.source.detune.setTargetAtTime( this.detune, this.context.currentTime, 0.01 );
+
+		}
+
+		return this;
+
+	},
+
+	getDetune: function () {
+
+		return this.detune;
+
+	},
+
 	getFilter: function () {
 
 		return this.getFilters()[ 0 ];
@@ -40075,7 +40153,7 @@ Audio.prototype = Object.assign( Object.create( Object3D.prototype ), {
 
 		if ( this.isPlaying === true ) {
 
-			this.source.playbackRate.setValueAtTime( this.playbackRate, this.context.currentTime );
+			this.source.playbackRate.setTargetAtTime( this.playbackRate, this.context.currentTime, 0.01 );
 
 		}
 
@@ -44066,7 +44144,6 @@ SpotLightHelper.prototype.dispose = function () {
 SpotLightHelper.prototype.update = function () {
 
 	var vector = new Vector3();
-	var vector2 = new Vector3();
 
 	return function update() {
 
@@ -44077,10 +44154,9 @@ SpotLightHelper.prototype.update = function () {
 
 		this.cone.scale.set( coneWidth, coneWidth, coneLength );
 
-		vector.setFromMatrixPosition( this.light.matrixWorld );
-		vector2.setFromMatrixPosition( this.light.target.matrixWorld );
+		vector.setFromMatrixPosition( this.light.target.matrixWorld );
 
-		this.cone.lookAt( vector2.sub( vector ) );
+		this.cone.lookAt( vector );
 
 		if ( this.color !== undefined ) {
 

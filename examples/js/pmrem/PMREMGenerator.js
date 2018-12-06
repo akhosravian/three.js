@@ -9,134 +9,150 @@
  * Code in the beginning of fragment shader's main function does this job for a given resolution.
  */
 
-THREE.PMREMGenerator = function ( sourceTexture, params = {} ) {
+THREE.PMREMGenerator = ( function () {
 
-	this.sourceTexture = sourceTexture;
-	this.sourceResolution = ( params.sourceResolution !== undefined ) ? params.sourceResolution : 512;
-	this.targetResolution = ( params.targetResolution !== undefined ) ? params.targetResolution : 256; // NODE: 256 is currently hard coded in the glsl code for performance reasons
-	this.samplesPerLevel = ( params.samplesPerLevel !== undefined ) ? params.samplesPerLevel : 32;
-	this.useImportanceSampling = ( params.useImportanceSampling !== undefined ) ? params.useImportanceSampling : false;
+	var shader = getShader();
+	var camera = new THREE.OrthographicCamera( - 1, 1, 1, - 1, 0.0, 1000 );
+	var scene = new THREE.Scene();
+	var planeMesh = new THREE.Mesh( new THREE.PlaneBufferGeometry( 2, 2, 0 ), shader );
+	planeMesh.material.side = THREE.DoubleSide;
+	scene.add( planeMesh );
+	scene.add( camera );
 
-	var monotonicEncoding = ( sourceTexture.encoding === THREE.LinearEncoding ) ||
-		( sourceTexture.encoding === THREE.GammaEncoding ) || ( sourceTexture.encoding === THREE.sRGBEncoding );
+	var PMREMGenerator = function ( sourceTexture, params = {} ) {
 
-	this.sourceTexture.minFilter = ( monotonicEncoding ) ? THREE.LinearFilter : THREE.NearestFilter;
-	this.sourceTexture.magFilter = ( monotonicEncoding ) ? THREE.LinearFilter : THREE.NearestFilter;
-	this.sourceTexture.generateMipmaps = this.sourceTexture.generateMipmaps && monotonicEncoding;
+		this.sourceTexture = sourceTexture;
+		this.sourceResolution = ( params.sourceResolution !== undefined ) ? params.sourceResolution : 512;
+		this.targetResolution = ( params.targetResolution !== undefined ) ? params.targetResolution : 256; // NODE: 256 is currently hard coded in the glsl code for performance reasons
+		this.samplesPerLevel = ( params.samplesPerLevel !== undefined ) ? params.samplesPerLevel : 32;
+		this.useImportanceSampling = ( params.useImportanceSampling !== undefined ) ? params.useImportanceSampling : false;
 
-	this.cubeLods = [];
+		var monotonicEncoding = ( this.sourceTexture.encoding === THREE.LinearEncoding ) ||
+			( this.sourceTexture.encoding === THREE.GammaEncoding ) || ( this.sourceTexture.encoding === THREE.sRGBEncoding );
 
-	var size = this.targetResolution;
-	var params = {
-		format: this.sourceTexture.format,
-		magFilter: this.sourceTexture.magFilter,
-		minFilter: this.sourceTexture.minFilter,
-		type: this.sourceTexture.type,
-		generateMipmaps: this.sourceTexture.generateMipmaps,
-		anisotropy: this.sourceTexture.anisotropy,
-		encoding: this.sourceTexture.encoding
-	 };
+		this.sourceTexture.minFilter = ( monotonicEncoding ) ? THREE.LinearFilter : THREE.NearestFilter;
+		this.sourceTexture.magFilter = ( monotonicEncoding ) ? THREE.LinearFilter : THREE.NearestFilter;
+		this.sourceTexture.generateMipmaps = this.sourceTexture.generateMipmaps && monotonicEncoding;
 
-	// how many LODs fit in the given CubeUV Texture.
-	this.numLods = Math.log( size ) / Math.log( 2 ) - 2; // IE11 doesn't support Math.log2
+		this.cubeLods = [];
 
-	for ( var i = 0; i < this.numLods; i ++ ) {
+		var size = this.targetResolution;
+		var params = {
+			format: this.sourceTexture.format,
+			magFilter: this.sourceTexture.magFilter,
+			minFilter: this.sourceTexture.minFilter,
+			type: this.sourceTexture.type,
+			generateMipmaps: this.sourceTexture.generateMipmaps,
+			anisotropy: this.sourceTexture.anisotropy,
+			encoding: this.sourceTexture.encoding
+		 };
 
-		var renderTarget = new THREE.WebGLRenderTargetCube( size, size, params );
-		renderTarget.texture.name = "PMREMGenerator.cube" + i;
-		this.cubeLods.push( renderTarget );
-		size = Math.max( 16, size / 2 );
-
-	}
-
-	this.camera = new THREE.OrthographicCamera( - 1, 1, 1, - 1, 0.0, 1000 );
-
-	this.shader = this.getShader();
-	this.shader.defines[ 'SAMPLES_PER_LEVEL' ] = this.samplesPerLevel;
-	this.planeMesh = new THREE.Mesh( new THREE.PlaneBufferGeometry( 2, 2, 0 ), this.shader );
-	this.planeMesh.material.side = THREE.DoubleSide;
-	this.scene = new THREE.Scene();
-	this.scene.add( this.planeMesh );
-	this.scene.add( this.camera );
-
-	this.shader.uniforms[ 'envMap' ].value = this.sourceTexture;
-	this.shader.envMap = this.sourceTexture;
-
-};
-
-THREE.PMREMGenerator.prototype = {
-
-	constructor: THREE.PMREMGenerator,
-
-	update: function ( renderer ) {
-
-		// Texture should only be flipped for CubeTexture, not for
-		// a Texture created via THREE.WebGLRenderTargetCube.
-		var tFlip = ( this.sourceTexture.isCubeTexture ) ? - 1 : 1;
-
-		this.shader.uniforms[ 'envMap' ].value = this.sourceTexture;
-		this.shader.envMap = this.sourceTexture;
-		if ( this.useImportanceSampling ) {
-			this.shader.uniforms[ 'sourceResolution' ].value = this.sourceResolution;
-		}
-
-		var gammaInput = renderer.gammaInput;
-		var gammaOutput = renderer.gammaOutput;
-		var toneMapping = renderer.toneMapping;
-		var toneMappingExposure = renderer.toneMappingExposure;
-		var currentRenderTarget = renderer.getRenderTarget();
-
-		renderer.toneMapping = THREE.LinearToneMapping;
-		renderer.toneMappingExposure = 1.0;
-		renderer.gammaInput = false;
-		renderer.gammaOutput = false;
+		// how many LODs fit in the given CubeUV Texture.
+		this.numLods = Math.log( size ) / Math.log( 2 ) - 2; // IE11 doesn't support Math.log2
 
 		for ( var i = 0; i < this.numLods; i ++ ) {
+			var renderTarget = new THREE.WebGLRenderTargetCube( size, size, params );
+			renderTarget.texture.name = "PMREMGenerator.cube" + i;
+			this.cubeLods.push( renderTarget );
+			size = Math.max( 16, size / 2 );
+		}
 
-			var r = i / ( this.numLods - 1 );
+		var extraUniforms = this.useImportanceSampling? getImportanceSamplingUniforms() : getRandomSamplingUniforms();
+		shader.uniforms = Object.assign(getBaseUniforms(), extraUniforms);
+
+		var shaderMain = this.useImportanceSampling? getImportanceSamplingFragmentShader() : getRandomSamplingShader();
+		shader.fragmentShader = getBaseFragmentShader() + shaderMain;
+
+	};
+
+	PMREMGenerator.prototype = {
+
+		constructor: PMREMGenerator,
+
+		update: function ( renderer ) {
+
+			// Texture should only be flipped for CubeTexture, not for
+			// a Texture created via THREE.WebGLRenderTargetCube.
+			var tFlip = ( this.sourceTexture.isCubeTexture ) ? - 1 : 1;
+
+			shader.defines[ 'SAMPLES_PER_LEVEL' ] = this.samplesPerLevel;
+			shader.uniforms[ 'faceIndex' ].value = 0;
+			shader.uniforms[ 'envMap' ].value = this.sourceTexture;
+			shader.envMap = this.sourceTexture;
 			if ( this.useImportanceSampling ) {
-				this.shader.uniforms[ 'roughness' ].value = r;
-        // always apply tFlip since importance sampling uses sourceTexture for all lods
-				this.shader.uniforms[ 'tFlip' ].value = tFlip; 
-			} else {
-				this.shader.uniforms[ 'roughness' ].value = r * 0.9; // see comment below, pragmatic choice
-				// Only apply the tFlip for the first LOD
-				this.shader.uniforms[ 'tFlip' ].value = ( i == 0 ) ? tFlip : 1;
+				shader.uniforms[ 'sourceResolution' ].value = this.sourceResolution;
 			}
-			this.shader.uniforms[ 'mapSize' ].value = this.cubeLods[ i ].width;
-			this.renderToCubeMapTarget( renderer, this.cubeLods[ i ] );
+			shader.needsUpdate = true;
 
-			if ( !this.useImportanceSampling && i < 5 ) this.shader.uniforms[ 'envMap' ].value = this.cubeLods[ i ].texture;
+			var gammaInput = renderer.gammaInput;
+			var gammaOutput = renderer.gammaOutput;
+			var toneMapping = renderer.toneMapping;
+			var toneMappingExposure = renderer.toneMappingExposure;
+			var currentRenderTarget = renderer.getRenderTarget();
 
-		}
+			renderer.toneMapping = THREE.LinearToneMapping;
+			renderer.toneMappingExposure = 1.0;
+			renderer.gammaInput = false;
+			renderer.gammaOutput = false;
 
-		renderer.setRenderTarget( currentRenderTarget );
-		renderer.toneMapping = toneMapping;
-		renderer.toneMappingExposure = toneMappingExposure;
-		renderer.gammaInput = gammaInput;
-		renderer.gammaOutput = gammaOutput;
+			for ( var i = 0; i < this.numLods; i ++ ) {
 
-	},
+				var r = i / ( this.numLods - 1 );
+				if ( this.useImportanceSampling ) {
+					shader.uniforms[ 'roughness' ].value = r;
+					// always apply tFlip since importance sampling uses sourceTexture for all lods
+					shader.uniforms[ 'tFlip' ].value = tFlip; 
+				} else {
+					shader.uniforms[ 'roughness' ].value = r * 0.9; // see comment below, pragmatic choice
+					// Only apply the tFlip for the first LOD
+					shader.uniforms[ 'tFlip' ].value = ( i == 0 ) ? tFlip : 1;
+				}
+				shader.uniforms[ 'mapSize' ].value = this.cubeLods[ i ].width;
+				this.renderToCubeMapTarget( renderer, this.cubeLods[ i ] );
 
-	renderToCubeMapTarget: function ( renderer, renderTarget ) {
+				if ( !this.useImportanceSampling && i < 5 ) shader.uniforms[ 'envMap' ].value = this.cubeLods[ i ].texture;
 
-		for ( var i = 0; i < 6; i ++ ) {
+			}
 
-			this.renderToCubeMapTargetFace( renderer, renderTarget, i );
+			renderer.setRenderTarget( currentRenderTarget );
+			renderer.toneMapping = toneMapping;
+			renderer.toneMappingExposure = toneMappingExposure;
+			renderer.gammaInput = gammaInput;
+			renderer.gammaOutput = gammaOutput;
 
-		}
+		},
 
-	},
+		renderToCubeMapTarget: function ( renderer, renderTarget ) {
 
-	renderToCubeMapTargetFace: function ( renderer, renderTarget, faceIndex ) {
+			for ( var i = 0; i < 6; i ++ ) {
 
-		renderTarget.activeCubeFace = faceIndex;
-		this.shader.uniforms[ 'faceIndex' ].value = faceIndex;
-		renderer.render( this.scene, this.camera, renderTarget, true );
+				this.renderToCubeMapTargetFace( renderer, renderTarget, i );
 
-	},
+			}
 
-	getShader: function () {
+		},
+
+		renderToCubeMapTargetFace: function ( renderer, renderTarget, faceIndex ) {
+
+			renderTarget.activeCubeFace = faceIndex;
+			shader.uniforms[ 'faceIndex' ].value = faceIndex;
+			renderer.render( scene, camera, renderTarget, true );
+
+		},
+
+		dispose: function () {
+
+			for ( var i = 0, l = this.cubeLods.length; i < l; i ++ ) {
+
+				this.cubeLods[ i ].dispose();
+
+			}
+
+		},
+
+	};
+
+	function getShader() {
 
 		var shaderMaterial = new THREE.ShaderMaterial( {
 
@@ -144,13 +160,7 @@ THREE.PMREMGenerator.prototype = {
 				"SAMPLES_PER_LEVEL": 20,
 			},
 
-			uniforms: {
-				"faceIndex": { value: 0 },
-				"roughness": { value: 0.5 },
-				"mapSize": { value: 0.5 },
-				"envMap": { value: null },
-				"tFlip": { value : - 1 },
-			},
+			uniforms: { },
 
 			vertexShader:
 				"varying vec2 vUv;\n\
@@ -159,95 +169,105 @@ THREE.PMREMGenerator.prototype = {
 					gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );\n\
 				}",
 
-			fragmentShader:
-				`#include <common>
-				varying vec2 vUv;
-				uniform int faceIndex;
-				uniform float roughness;
-				uniform float mapSize;
-				uniform samplerCube envMap;
-				uniform float tFlip;
-				mat3 MatrixFromVector(vec3 n) {
-					float a = 1.0 / (1.0 + n.z);
-					float b = -n.x * n.y * a;
-					vec3 b1 = vec3(1.0 - n.x * n.x * a, b, -n.x);
-					vec3 b2 = vec3(b, 1.0 - n.y * n.y * a, -n.y);
-					return mat3(b1, b2, n);
-				}
-				vec3 GetSampleDirection() {
-					vec2 uv = vUv*2.0 - 1.0;
-					float offset = -1.0/mapSize;
-					const float a = -1.0;
-					const float b = 1.0;
-					float c = -1.0 + offset;
-					float d = 1.0 - offset;
-					float bminusa = b - a;
-					uv.x = (uv.x - a)/bminusa * d - (uv.x - b)/bminusa * c;
-					uv.y = (uv.y - a)/bminusa * d - (uv.y - b)/bminusa * c;
-					if (faceIndex==0) {
-						return vec3(tFlip * 1.0, -uv.y, -uv.x);
-					} else if (faceIndex==1) {
-						return vec3(tFlip * -1.0, -uv.y, uv.x);
-					} else if (faceIndex==2) {
-						return vec3(tFlip * uv.x, 1.0, uv.y);
-					} else if (faceIndex==3) {
-						return vec3(tFlip * uv.x, -1.0, -uv.y);
-					} else if (faceIndex==4) {
-						return vec3(tFlip * uv.x, -uv.y, 1.0);
-					} else {
-						return vec3(tFlip * -uv.x, -uv.y, -1.0);
-					}
-				}
-				vec3 testColorMap() {
-					vec3 color;
-					if(faceIndex == 0)
-						color = vec3(1.0,0.0,0.0);
-					else if(faceIndex == 1)
-						color = vec3(0.0,1.0,0.0);
-					else if(faceIndex == 2)
-						color = vec3(0.0,0.0,1.0);
-					else if(faceIndex == 3)
-						color = vec3(1.0,1.0,0.0);
-					else if(faceIndex == 4)
-						color = vec3(0.0,1.0,1.0);
-					else
-						color = vec3(1.0,0.0,1.0);
-					color *= ( 1.0 - roughness );
-					return color;
-				}
-				vec3 ImportanceSampleGGX(vec2 Xi, mat3 vecSpace)
-				{
-					float a = roughness * roughness;
-					float Phi = 2.0 * PI * Xi.x;
-					float CosTheta = sqrt( (1.0 - Xi.y) / ( 1.0 + (a*a - 1.0) * Xi.y ) );
-					float SinTheta = sqrt( 1.0 - CosTheta * CosTheta );
-					return vecSpace * vec3(SinTheta * cos( Phi ), SinTheta * sin( Phi ), CosTheta);
-				}
-				`,
+			fragmentShader: "",
 
 			blending: THREE.NoBlending
 
 		} );
 
-		var extraUniforms = this.useImportanceSampling? this.getImportanceSamplingUniforms() : this.getRandomSamplingUniforms();
-		shaderMaterial.uniforms = Object.assign(shaderMaterial.uniforms, extraUniforms);
-
-		var shaderMain = this.useImportanceSampling? this.getImportanceSamplingFragmentShader() : this.getRandomSamplingShader();
-		shaderMaterial.fragmentShader += shaderMain;
-
 		shaderMaterial.type = 'PMREMGenerator';
 
 		return shaderMaterial;
 
-	},
+	}
 
-	getRandomSamplingUniforms: function () {
+	function getBaseUniforms() {
+
+		return {
+			"faceIndex": { value: 0 },
+			"roughness": { value: 0.5 },
+			"mapSize": { value: 0.5 },
+			"envMap": { value: null },
+			"tFlip": { value: - 1 },
+		};
+	}
+
+	function getBaseFragmentShader() {
+
+		return `#include <common>
+			varying vec2 vUv;
+			uniform int faceIndex;
+			uniform float roughness;
+			uniform float mapSize;
+			uniform samplerCube envMap;
+			uniform float tFlip;
+			mat3 MatrixFromVector(vec3 n) {
+				float a = 1.0 / (1.0 + n.z);
+				float b = -n.x * n.y * a;
+				vec3 b1 = vec3(1.0 - n.x * n.x * a, b, -n.x);
+				vec3 b2 = vec3(b, 1.0 - n.y * n.y * a, -n.y);
+				return mat3(b1, b2, n);
+			}
+			vec3 GetSampleDirection() {
+				vec2 uv = vUv*2.0 - 1.0;
+				float offset = -1.0/mapSize;
+				const float a = -1.0;
+				const float b = 1.0;
+				float c = -1.0 + offset;
+				float d = 1.0 - offset;
+				float bminusa = b - a;
+				uv.x = (uv.x - a)/bminusa * d - (uv.x - b)/bminusa * c;
+				uv.y = (uv.y - a)/bminusa * d - (uv.y - b)/bminusa * c;
+				if (faceIndex==0) {
+					return vec3(tFlip * 1.0, -uv.y, -uv.x);
+				} else if (faceIndex==1) {
+					return vec3(tFlip * -1.0, -uv.y, uv.x);
+				} else if (faceIndex==2) {
+					return vec3(tFlip * uv.x, 1.0, uv.y);
+				} else if (faceIndex==3) {
+					return vec3(tFlip * uv.x, -1.0, -uv.y);
+				} else if (faceIndex==4) {
+					return vec3(tFlip * uv.x, -uv.y, 1.0);
+				} else {
+					return vec3(tFlip * -uv.x, -uv.y, -1.0);
+				}
+			}
+			vec3 testColorMap() {
+				vec3 color;
+				if(faceIndex == 0)
+					color = vec3(1.0,0.0,0.0);
+				else if(faceIndex == 1)
+					color = vec3(0.0,1.0,0.0);
+				else if(faceIndex == 2)
+					color = vec3(0.0,0.0,1.0);
+				else if(faceIndex == 3)
+					color = vec3(1.0,1.0,0.0);
+				else if(faceIndex == 4)
+					color = vec3(0.0,1.0,1.0);
+				else
+					color = vec3(1.0,0.0,1.0);
+				color *= ( 1.0 - roughness );
+				return color;
+			}
+			vec3 ImportanceSampleGGX(vec2 Xi, mat3 vecSpace)
+			{
+				float a = roughness * roughness;
+				float Phi = 2.0 * PI * Xi.x;
+				float CosTheta = sqrt( (1.0 - Xi.y) / ( 1.0 + (a*a - 1.0) * Xi.y ) );
+				float SinTheta = sqrt( 1.0 - CosTheta * CosTheta );
+				return vecSpace * vec3(SinTheta * cos( Phi ), SinTheta * sin( Phi ), CosTheta);
+			}
+		`
+
+	}
+
+	function getRandomSamplingUniforms() {
 
 		return { };
 
-	},
+	}
 
-	getRandomSamplingShader: function () {
+	function getRandomSamplingShader() {
 
 		/*
 		 * Prashant Sharma / spidersharma03: More thought and work is needed here.
@@ -286,15 +306,15 @@ THREE.PMREMGenerator.prototype = {
 			}
 		`;
 
-	},
+	}
 
-	getImportanceSamplingUniforms: function () {
+	function getImportanceSamplingUniforms() {
 
 		return { "sourceResolution": { value : 256.0 } };
 
-	},
+	}
 
-	getImportanceSamplingFragmentShader: function () {
+	function getImportanceSamplingFragmentShader() {
 
 		/* Andrew Khosravian: Hammersley2d functionality from 
 		 * https://learnopengl.com/PBR/IBL/Specular-IBL
@@ -367,20 +387,8 @@ THREE.PMREMGenerator.prototype = {
 				gl_FragColor = linearToOutputTexel( vec4( rgbColor, 1.0 ) );
 			}`;
 
-	},
-
-
-	dispose: function () {
-
-		for ( var i = 0, l = this.cubeLods.length; i < l; i ++ ) {
-
-			this.cubeLods[ i ].dispose();
-
-		}
-
-		this.planeMesh.geometry.dispose();
-		this.planeMesh.material.dispose();
-
 	}
 
-};
+	return PMREMGenerator;
+
+} )();
