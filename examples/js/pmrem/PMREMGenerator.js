@@ -100,8 +100,6 @@ THREE.PMREMGenerator = ( function () {
 				var r = i / ( this.numLods - 1 );
 				if ( this.useImportanceSampling ) {
 					shader.uniforms[ 'roughness' ].value = r;
-					// always apply tFlip since importance sampling uses sourceTexture for all lods
-					shader.uniforms[ 'tFlip' ].value = tFlip; 
 				} else {
 					shader.uniforms[ 'roughness' ].value = r * 0.9; // see comment below, pragmatic choice
 					// Only apply the tFlip for the first LOD
