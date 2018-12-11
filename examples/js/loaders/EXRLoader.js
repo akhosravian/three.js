@@ -14,14 +14,14 @@
 
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are met:
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
-//     * Redistributions in binary form must reproduce the above copyright
-//       notice, this list of conditions and the following disclaimer in the
-//       documentation and/or other materials provided with the distribution.
-//     * Neither the name of the Syoyo Fujita nor the
-//       names of its contributors may be used to endorse or promote products
-//       derived from this software without specific prior written permission.
+//		 * Redistributions of source code must retain the above copyright
+//			 notice, this list of conditions and the following disclaimer.
+//		 * Redistributions in binary form must reproduce the above copyright
+//			 notice, this list of conditions and the following disclaimer in the
+//			 documentation and/or other materials provided with the distribution.
+//		 * Neither the name of the Syoyo Fujita nor the
+//			 names of its contributors may be used to endorse or promote products
+//			 derived from this software without specific prior written permission.
 
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
 // ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -47,13 +47,13 @@
 // // Redistribution and use in source and binary forms, with or without
 // // modification, are permitted provided that the following conditions are
 // // met:
-// // *       Redistributions of source code must retain the above copyright
+// // *			 Redistributions of source code must retain the above copyright
 // // notice, this list of conditions and the following disclaimer.
-// // *       Redistributions in binary form must reproduce the above
+// // *			 Redistributions in binary form must reproduce the above
 // // copyright notice, this list of conditions and the following disclaimer
 // // in the documentation and/or other materials provided with the
 // // distribution.
-// // *       Neither the name of Industrial Light & Magic nor the names of
+// // *			 Neither the name of Industrial Light & Magic nor the names of
 // // its contributors may be used to endorse or promote products derived
 // // from this software without specific prior written permission.
 // //
@@ -86,11 +86,11 @@ THREE.EXRLoader.prototype._parser = function ( buffer ) {
 	const USHORT_RANGE = (1 << 16);
 	const BITMAP_SIZE = (USHORT_RANGE >> 3);
 
-	const HUF_ENCBITS = 16;  // literal (value) bit length
-	const HUF_DECBITS = 14;  // decoding bit size (>= 8)
+	const HUF_ENCBITS = 16;	// literal (value) bit length
+	const HUF_DECBITS = 14;	// decoding bit size (>= 8)
 
-	const HUF_ENCSIZE = (1 << HUF_ENCBITS) + 1;  // encoding table size
-	const HUF_DECSIZE = 1 << HUF_DECBITS;        // decoding table size
+	const HUF_ENCSIZE = (1 << HUF_ENCBITS) + 1;	// encoding table size
+	const HUF_DECSIZE = 1 << HUF_DECBITS;				// decoding table size
 	const HUF_DECMASK = HUF_DECSIZE - 1;
 
 	const SHORT_ZEROCODE_RUN = 59;
@@ -771,7 +771,7 @@ THREE.EXRLoader.prototype._parser = function ( buffer ) {
 
 		}
 
-		var stringValue = new TextDecoder().decode(
+		var stringValue = THREE.LoaderUtils.decodeText( 
 			uintBuffer.slice( offset.value, offset.value + endOffset )
 		);
 
@@ -783,7 +783,7 @@ THREE.EXRLoader.prototype._parser = function ( buffer ) {
 
 	function parseFixedLengthString( buffer, offset, size ) {
 
-		var stringValue = new TextDecoder().decode(
+		var stringValue = THREE.LoaderUtils.decodeText(
 			new Uint8Array( buffer ).slice( offset.value, offset.value + size )
 		);
 
