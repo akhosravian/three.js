@@ -793,6 +793,32 @@ THREE.EXRLoader.prototype._parser = function ( buffer ) {
 
 	}
 
+	function parseStringVector( buffer, offset, totalSize ) {
+
+		result = []
+		var endOffset = offset.value + totalSize
+		while ( offset.value < endOffset ) {
+
+			var strSize = parseUint32( bufferDataView, offset );
+			var strValue = THREE.LoaderUtils.decodeText(
+				new Uint8Array( buffer ).slice( offset.value, offset.value + strSize )
+			);
+			result.push( strValue );
+			offset.value += strSize;
+
+		}
+
+		if ( offset.value != endOffset ) {
+			
+			result = []
+			offset.value = endOffset;
+			
+		}
+
+		return result;
+
+	}
+
 	function parseUlong( dataView, offset ) {
 
 		var uLong = dataView.getUint32( 0, true );
@@ -1012,6 +1038,10 @@ THREE.EXRLoader.prototype._parser = function ( buffer ) {
 		} else if ( type === 'int' ) {
 
 			return parseUint32( dataView, offset );
+
+		} else if ( type == 'stringvector' ) {
+
+			return parseStringVector( buffer, offset, size );
 
 		} else {
 
